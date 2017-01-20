@@ -1,2 +1,2 @@
 require('coffee-script/register');
-require('./lib/badge-gen');
+module.exports = require('./lib/badge-gen');
