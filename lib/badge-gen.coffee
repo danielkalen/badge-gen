@@ -1,15 +1,14 @@
 Promise = require 'bluebird'
-fs = Promise.promisifyAll require 'fs-extra'
-fs.createOutputStream = require 'create-output-stream'
+fs = require 'fs-jetpack'
 lcovParse = Promise.promisify require 'lcov-parse'
 PATH = require 'path'
 extend = require 'extend'
-request = require 'request'
+axios = require 'axios'
 svg2png = require 'svg2png'
 defaultOptions = require './defaults'
 
 genBadgeUrl = (label, value, color)->
-	"https://img.shields.io/badge/#{encodeURIComponent(label)}-#{encodeURIComponent(value)}-#{color}.svg"
+	"https://img.shields.io/badge/#{encodeURIComponent(label)}-#{encodeURIComponent(value)}-#{color}"
 
 
 calcCoverage = (lcov)->
@@ -32,22 +31,18 @@ calcCoverage = (lcov)->
 
 module.exports = (options)->
 	options = extend({}, defaultOptions, options)
-	
-	fs.statAsync(options.dest)
-		.then (destStats)-> options.dest = PATH.join(options.dest,'coverage') unless destStats.isFile()
-		.catch ()-> true
-		.then ()->
-			lcovParse(options.source).then (parsed)->
-				values = calcCoverage(parsed[0])
-				
-				request genBadgeUrl(options.label, values.coverage, values.color)
-					.pipe fs.createOutputStream("#{options.dest}.svg")
-					
-					.on 'finish', (err)-> if err then throw err else
-						fs.readFileAsync("#{options.dest}.svg").then (svgBuffer)->
-							svg2png(svgBuffer).then (pngBuffer)->
-								fs.outputFileAsync "#{options.dest}.png", pngBuffer
-		
+	Promise.resolve()
+		.then ()-> fs.inspectAsync(options.dest)
+		.then (dest)-> options.dest = PATH.join(options.dest,'coverage') unless dest?.type is 'file' or options.dest.endsWith('coverage')
+		.then ()-> fs.dirAsync PATH.join(options.dest,'..')
+		.then ()-> lcovParse(options.source)
+		.then (parsed)-> calcCoverage(parsed[0])
+		.then (values)-> genBadgeUrl(options.label, values.coverage, values.color)
+		.then (url)-> axios.get("#{url}.svg").then (res)-> res.data
+		.then (svg)-> fs.writeAsync("#{options.dest}.svg", svg)
+		.then ()-> fs.readAsync("#{options.dest}.svg", 'buffer')
+		.then svg2png
+		.then (png)-> fs.writeAsync "#{options.dest}.png", png
 		.catch (err)-> throw err
 
 
